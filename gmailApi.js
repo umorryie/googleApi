@@ -2,7 +2,7 @@ const fs = require("fs");
 const readline = require("readline");
 const readlineSync = require('readline-sync');
 const {google} = require("googleapis");
-const maxResults = 1;
+const maxResults = 10000;
 const SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"];
 const TOKEN_PATH = "token.json";
 let nextPageToken = null;
@@ -57,48 +57,49 @@ async function fetchMessages(auth, labelIds, subject, emailSender, afterDate, be
         labelIds
     };
 
-    if (nextPageToken) {
-        options.nextPageToken = nextPageToken;
-    }
-
     try {
-        const emails = await gmail.users.messages.list(options);
-        if (! emails) {
-            return console.log("Emails could not be retrieved. Error.");
-        } else if (emails.data) {
-            if (emails.data.resultSizeEstimate == 0) {
-                return console.log("No messages for this criteria!");
+        let haveNextPage = true;
+        while (haveNextPage) {
+            if (nextPageToken) {
+                options.pageToken = nextPageToken;
             }
-            if (emails.data.nextPageToken) {
-                nextPageToken = emails.data.nextPageToken;
-            } else {
-                nextPageToken = null;
-            }
-
-            for (let index = 0; index < emails.data.messages.length; index++) {
-                const email = emails.data.messages[index];
-                const id = email.id;
-                const messageResponse = await gmail.users.messages.get({id, userId: "me"});
-                const key = `messageId-${
-                    id
-                }`;
-                responseData[key] = {
-                    key: id
-                };
-
-                const payload = messageResponse.data.payload;
-
-                let loopedMessages = recursivelyLoopOverMessage(payload);
-                if (shouldGetAttachment) {
-                    for (let index = 1; index < loopedMessages.length; index++) {
-                        const attachmentDetails = await gmail.users.messages.attachments.get({messageId: id, userId: "me", id: loopedMessages[1].attachment.attachmentId});
-                        loopedMessages[index].attachment.rawData = attachmentDetails.data;
-                    }
+            const emails = await gmail.users.messages.list(options);
+            if (! emails) {
+                return console.log("Emails could not be retrieved. Error.");
+            } else if (emails.data) {
+                if (emails.data.resultSizeEstimate == 0) {
+                    return console.log("No messages for this criteria!");
                 }
-                responseData[key]["data"] = loopedMessages;
+                if (emails.data.nextPageToken) {
+                    nextPageToken = emails.data.nextPageToken;
+                } else {
+                    nextPageToken = null;
+                    haveNextPage = false;
+                }
+                for (let index = 0; index < emails.data.messages.length; index++) {
+                    const email = emails.data.messages[index];
+                    const id = email.id;
+                    const messageResponse = await gmail.users.messages.get({id, userId: "me"});
+                    const key = `messageId-${
+                        id
+                    }`;
+                    responseData[key] = {
+                        key: id
+                    };
+
+                    const payload = messageResponse.data.payload;
+
+                    let loopedMessages = recursivelyLoopOverMessage(payload);
+                    if (shouldGetAttachment) {
+                        for (let index = 1; index < loopedMessages.length; index++) {
+                            const attachmentDetails = await gmail.users.messages.attachments.get({messageId: id, userId: "me", id: loopedMessages[1].attachment.attachmentId});
+                            loopedMessages[index].attachment.rawData = attachmentDetails.data;
+                        }
+                    }
+                    responseData[key]["data"] = loopedMessages;
+                }
             }
         }
-
         return responseData;
     } catch (err) {
         return console.log("Error when retrieving mails:", err)
@@ -193,14 +194,8 @@ async function registerToken() {
         return console.log("Error when reading credentials.json:", err);
     }
 }
+
 module.exports = {
     readGmail,
     registerToken
 };
-
-async function testFunctionality() {
-    const res = await readGmail(["INBOX"], "", "no-reply@mimovrste.si", "2020/2/9", "2021/3/9", !false);
-    console.log(res['messageId-177aa872ea83a690'].data)
-}
-
-testFunctionality();
